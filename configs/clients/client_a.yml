@@ -1,0 +1,12 @@
+client_id: client_a
+model:
+  class_path: dynserv.models.emotion:EmotionClassifier
+  version: "1.0.0"
+  params:
+    labels: ["felice","triste","arrabbiato"]
+preprocessing:
+  - class_path: dynserv.processors.pre:Strip
+  - class_path: dynserv.processors.pre:Lowercase
+postprocessing:
+  - class_path: dynserv.processors.post:TopK
+rules: []

@@ -1,0 +1,31 @@
+client_id: client_b
+model:
+  class_path: dynserv.models.ticket:TicketClassifier
+  version: "2.1.0"
+  params: {}
+preprocessing:
+  - class_path: dynserv.processors.pre:Lowercase
+  - class_path: dynserv.processors.pre:Strip
+postprocessing:
+  - class_path: dynserv.processors.post:TopK
+rules:
+  - name: vendite_con_rimborso_diventa_supporto
+    when:
+      - type: pred_is
+        label: vendite
+      - type: text_contains_any
+        words: ["rimborso"]
+    then:
+      - type: set_pred
+        label: supporto
+  - name: breve_saluto_diventa_supporto
+    when:
+      - type: pred_is
+        label: generico
+      - type: text_len_lt
+        n: 20
+      - type: text_contains_any
+        words: ["ciao","arrivederci"]
+    then:
+      - type: set_pred
+        label: supporto

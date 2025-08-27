@@ -1,0 +1,15 @@
+[project]
+name = "dynamic-inference-service"
+version = "0.1.0"
+description = "Configurable dynamic inference service with per-client models, preprocessing, postprocessing, and rule engine."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.23",
+    "pydantic>=2.7",
+    "pyyaml>=6.0.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

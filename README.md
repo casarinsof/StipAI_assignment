@@ -1,85 +1,52 @@
 # Dynamic Inference Service
 
-Un servizio di inferenza **configurabile** che carica dinamicamente modelli, pre/post-processing e regole **per cliente** in base a `client_id`.
+A configurable text-inference service built with FastAPI. For each request, the service loads the model, pre-processing steps, post-processing steps and business rules defined for the given `client_id` in a YAML file, so different clients get isolated pipelines without code changes.
 
-## Caratteristiche
-- Caricamento dinamico di **modello**, **pre-processing**, **post-processing** e **regole** da file YAML.
-- Supporto per **più clienti**, ciascuno con configurazione isolata.
-- Pipeline: **pre → predizione → post → regole**.
-- **Test** end-to-end di esempio.
-- **Versioning** del modello (campo `model.version`).
-- **Cache** LRU dei componenti caricati per velocizzare il runtime.
+## Features
+- Per-client configuration in YAML (`configs/clients/<client_id>.yml`).
+- Components (model, processors) are resolved dynamically from `module:Class` paths.
+- Pipeline: pre-processing -> model prediction -> post-processing -> rules.
+- Model versioning through the `model.version` field, returned in every response.
+- In-process LRU cache of loaded configs and pipelines.
+- The bundled models are keyword-based mocks, not real ML models; they are meant to be replaced.
 
-## TODO futuri:
-- implementazione modelli, ad esempio utilizzando un transformer scaricando gia' il modello da Hungging Facce (accurato ma pesante)
-- step intermedio: utilizzare anche un semplice classificatore
-- utizzare direttamente delle API esterne (OpenAI, Azure ecc)
-
-## Struttura
+## Repository structure
 ```
 .
-├── pyproject.toml
-├── README.md
-├── configs/
-│   └── clients/
-│       ├── client_a.yml
-│       └── client_b.yml
-├── src/
-│   └── dynserv/
-│       ├── __init__.py
-│       ├── server.py
-│       ├── loader.py
-│       ├── pipeline.py
-│       ├── config.py
-│       ├── models/
-│       │   ├── base.py
-│       │   ├── emotion.py
-│       │   └── ticket.py
-│       ├── processors/
-│       │   ├── pre.py
-│       │   └── post.py
-│       └── rules/
-│           ├── base.py
-│           └── builtin.py
-└── tests/
-    └── test_end_to_end.py
+├── pyproject.toml            # package metadata and dependencies
+├── configs/clients/          # one YAML file per client
+├── src/dynserv/
+│   ├── server.py             # FastAPI app, POST /infer
+│   ├── pipeline.py           # Pipeline class, config and pipeline caching
+│   ├── config.py             # pydantic config schemas
+│   ├── loader.py             # "module:Class" dynamic import
+│   ├── models/               # classifiers (emotion, ticket)
+│   ├── processors/           # pre.py and post.py processing steps
+│   └── rules/                # rule predicates and actions
+└── tests/test_end_to_end.py
 ```
 
-## Requisiti
-- Python 3.9+
-
-## Installazione (dev)
+## Installation
+Requires Python 3.9+.
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e .
-pip install pytest
+pip install -e ".[test]"
 ```
 
-## Avvio del server
+## Usage
+Run from the repository root (config directory defaults to `./configs/clients`, override with `DYNCONF_DIR`):
 ```bash
-uvicorn src.dynserv.server:app --reload
+uvicorn dynserv.server:app --reload
 ```
-
-## Esecuzione di esempio (HTTP)
 ```bash
-curl -s -X POST "http://127.0.0.1:8000/infer" \
+curl -s -X POST http://127.0.0.1:8000/infer \
   -H "Content-Type: application/json" \
   -d '{"client_id":"client_a","text":"oggi sono molto felice :D"}'
-# -> {"client_id":"client_a","model_version":"1.0.0","label":"felice", ...}
-
-curl -s -X POST "http://127.0.0.1:8000/infer" \
-  -H "Content-Type: application/json" \
-  -d '{"client_id":"client_b","text":"richiesta di rimborso per ordine #123"}'
-# -> regola: sales -> support
 ```
+An unknown `client_id` returns HTTP 404.
 
-## Esecuzione test
-```bash
-pytest -q
-```
-
-## Configurazione per cliente
-Esempio `configs/clients/client_b.yml`:
+## Client configuration
+Example (`configs/clients/client_b.yml`):
 ```yaml
 client_id: client_b
 model:
@@ -88,35 +55,27 @@ model:
   params: {}
 preprocessing:
   - class_path: dynserv.processors.pre:Lowercase
-  - class_path: dynserv.processors.pre:Strip
 postprocessing:
   - class_path: dynserv.processors.post:TopK
     params: {k: 3}
 rules:
   - name: vendite_con_rimborso_diventa_supporto
     when:
-      - type: pred_is
-        label: vendite
-      - type: text_contains_any
-        words: ["rimborso"]
+      - {type: pred_is, label: vendite}
+      - {type: text_contains_any, words: ["rimborso"]}
     then:
-      - type: set_pred
-        label: supporto
-  - name: breve_saluto_diventa_supporto
-    when:
-      - type: pred_is
-        label: generico
-      - type: text_len_lt
-        n: 20
-      - type: text_contains_any
-        words: ["ciao","arrivederci"]
-    then:
-      - type: set_pred
-        label: supporto
+      - {type: set_pred, label: supporto}
 ```
+Rule predicates: `pred_is`, `text_contains_any`, `text_len_lt`. Actions: `set_pred`. All predicates in `when` are combined with AND; OR is not supported.
 
-## Note e Assunzioni
-- I modelli sono **mock** per semplicità (keyword-based): come detto sopra, i classificatori implementati non sono veri modelli di machine learning, ma versioni semplificate che si basano su semplici regole di matching di parole chiave, chiaramente da sostituire. 
-- la persistenza dei dati non e' trattata: improvements possibili: PostreSQL, MongoDB
-- Le regole sono **AND** fra i predicati nella lista `when`: significa che, perché una regola si attivi, tutti i predicati presenti devono essere veri contemporaneamente. Non è al momento supportata la logica OR o la combinazione di operatori più complessi, che potrebbero essere aggiunti in versioni evolute.
-- La cache è in-process; Ciò implica che: la cache è valida solo per il singolo processo in esecuzione e si perde allo spegnimento del servizio. In produzione si può usare un object store (tipo S3) per garantire coerenza e scalabilita'.
+## Tests
+```bash
+pytest -q
+```
+Tests must run from the repository root (they read `configs/clients`).
+
+## Notes and limitations
+- Models are mock keyword classifiers.
+- No persistence layer.
+- The cache is per process and lost on restart.
+- Possible future work: transformer-based or external-API models.
